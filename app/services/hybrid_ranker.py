@@ -1,30 +1,26 @@
 def calculate_hybrid_score(
     transcript_score: int,
     visual_score: int,
-    gameplay_ratio: float
+    gameplay_ratio: float,
+    motion_score: float = 0
 ) -> dict:
-    """
-    Combine transcript and visual evidence.
-
-    Provisional weights:
-    Transcript: 85%
-    Visual: 15%
-
-    Gameplay ratio is metadata, not visual confidence.
-    """
+    """Combine transcript, visual action and motion evidence."""
 
     transcript_score = max(0, min(100, transcript_score))
     visual_score = max(0, min(100, visual_score))
+    motion_score = max(0, min(100, motion_score))
     gameplay_ratio = max(0.0, min(1.0, gameplay_ratio))
 
     final_score = round(
-        transcript_score * 0.85
-        + visual_score * 0.15
+        transcript_score * 0.70
+        + visual_score * 0.20
+        + motion_score * 0.10
     )
 
     return {
         "transcript_score": transcript_score,
         "visual_score": visual_score,
+        "motion_score": round(motion_score, 2),
         "gameplay_ratio": round(gameplay_ratio, 2),
         "hybrid_score": final_score
     }

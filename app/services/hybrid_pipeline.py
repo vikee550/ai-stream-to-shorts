@@ -1,3 +1,4 @@
+
 import logging
 from pathlib import Path
 
@@ -5,6 +6,7 @@ from app.services.ranker import rank_moments
 from app.services.multi_frame_analyzer import analyze_multiple_frames
 from app.services.hybrid_ranker import calculate_hybrid_score
 from app.services.frame_extractor import get_video_duration
+from app.services.motion_detector import analyze_motion
 
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ def rank_hybrid_candidates(
     visual_top_n: int = 5,
     overlap_threshold: float = 0.5
 ) -> list:
-    """Validate, rank, deduplicate and visually analyze candidates."""
+    """Validate, rank, visually analyze and measure candidate motion."""
 
     if not candidates:
         logger.warning("No candidates received.")
@@ -74,7 +76,6 @@ def rank_hybrid_candidates(
     if not 0 <= overlap_threshold <= 1:
         raise ValueError("overlap_threshold must be between 0 and 1.")
 
-    # Step 1: Validate video before running AI.
     video = Path(video_path)
 
     if not video.is_file():
@@ -85,11 +86,9 @@ def rank_hybrid_candidates(
     video_duration = get_video_duration(str(video))
 
     logger.info("Video duration: %.2f seconds", video_duration)
-
     logger.info("===== HYBRID RANKING STARTED =====")
     logger.info("Input candidates: %d", len(candidates))
 
-    # Step 2: Validate candidate timestamps and duration.
     prepared_candidates = []
 
     for moment in candidates:
@@ -130,7 +129,6 @@ def rank_hybrid_candidates(
         logger.warning("No valid candidates available.")
         return []
 
-    # Step 3: Transcript ranking.
     transcript_ranked = rank_moments(prepared_candidates)
 
     logger.info(
@@ -138,7 +136,6 @@ def rank_hybrid_candidates(
         len(transcript_ranked)
     )
 
-    # Step 4: Remove duplicates.
     unique_candidates = remove_overlapping_candidates(
         transcript_ranked,
         overlap_threshold=overlap_threshold
@@ -149,7 +146,6 @@ def rank_hybrid_candidates(
         len(transcript_ranked) - len(unique_candidates)
     )
 
-    # Step 5: Select top candidates.
     selected_candidates = unique_candidates[:visual_top_n]
 
     logger.info(
@@ -160,7 +156,6 @@ def rank_hybrid_candidates(
     hybrid_results = []
     failed_count = 0
 
-    # Step 6: Visual analysis and hybrid scoring.
     for index, moment in enumerate(selected_candidates, start=1):
         logger.info(
             "Analyzing candidate %d/%d",
@@ -176,26 +171,34 @@ def rank_hybrid_candidates(
                 frame_count=frame_count
             )
 
+            motion_result = analyze_motion(
+                str(video),
+                moment["start"],
+                moment["end"]
+            )
+
             hybrid_score = calculate_hybrid_score(
                 transcript_score=moment["score"],
                 visual_score=visual_result["visual_score"],
-                gameplay_ratio=visual_result["gameplay_ratio"]
+                gameplay_ratio=visual_result["gameplay_ratio"],
+                motion_score=motion_result["motion_score"]
             )
 
             hybrid_results.append({
                 **moment,
                 **hybrid_score,
+                "motion_ratio": motion_result["motion_ratio"],
+                "motion_samples": motion_result["samples_compared"],
                 "visual_frames_analyzed": visual_result["frames_analyzed"]
             })
 
         except Exception:
             failed_count += 1
             logger.exception(
-                "Visual analysis failed for candidate %d",
+                "Candidate analysis failed for candidate %d",
                 index
             )
 
-    # Step 7: Final summary.
     hybrid_results.sort(
         key=lambda item: item["hybrid_score"],
         reverse=True
@@ -205,8 +208,9 @@ def rank_hybrid_candidates(
     logger.info("Input: %d", len(candidates))
     logger.info("Valid: %d", len(prepared_candidates))
     logger.info("Unique: %d", len(unique_candidates))
-    logger.info("Visually selected: %d", len(selected_candidates))
-    logger.info("Visual failures: %d", failed_count)
+    logger.info("Selected: %d", len(selected_candidates))
+    logger.info("Analysis failures: %d", failed_count)
     logger.info("Successful results: %d", len(hybrid_results))
 
     return hybrid_results
+
