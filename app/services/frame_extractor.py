@@ -80,3 +80,52 @@ def extract_frame(
         raise RuntimeError("Extracted frame is missing or empty.")
 
     return str(output)
+
+
+def extract_multiple_frames(
+    video_path: str,
+    timestamp: float,
+    output_dir: str = "storage/temp",
+    frame_count: int = 3,
+    interval: float = 1.0
+) -> list:
+    """Extract consecutive frames around a selected timestamp."""
+
+    if frame_count < 1:
+        raise ValueError("frame_count must be at least 1.")
+
+    if interval <= 0:
+        raise ValueError("interval must be greater than 0.")
+
+    duration = get_video_duration(video_path)
+
+    if timestamp < 0 or timestamp >= duration:
+        raise ValueError("Timestamp is outside video duration.")
+
+    video = Path(video_path)
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    paths = []
+    first_offset = (frame_count - 1) / 2
+
+    for index in range(frame_count):
+        frame_timestamp = (
+            timestamp + (index - first_offset) * interval
+        )
+
+        frame_timestamp = max(0, min(frame_timestamp, duration - 0.01))
+
+        output_path = directory / (
+            f"sequence-{int(timestamp)}-{index}.jpg"
+        )
+
+        extract_frame(
+            str(video),
+            frame_timestamp,
+            str(output_path)
+        )
+
+        paths.append(str(output_path))
+
+    return paths
