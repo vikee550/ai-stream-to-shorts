@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Environment secrets
+.env
+.env.*
+
+# Video files
+storage/videos/*
+storage/clips/*
+storage/temp/*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Local backup files
+*.backup.py
+*backup.py
