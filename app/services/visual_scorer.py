@@ -8,13 +8,26 @@ ACTION_SCORES = {
             "massive explosion",
             "dramatic destruction",
             "explosion",
+            "explodes",
+            "exploding",
             "major crash"
+        ]
+    },
+    "vehicle_high": {
+        "score": 85,
+        "keywords": [
+            "high speed chase",
+            "vehicle crash",
+            "car crash",
+            "vehicle collision",
+            "car collision",
+            "crashing into a vehicle",
+            "vehicle explosion"
         ]
     },
     "high": {
         "score": 80,
         "keywords": [
-            "high speed chase",
             "intense fight",
             "gunfight",
             "firefight",
@@ -24,15 +37,33 @@ ACTION_SCORES = {
             "chasing"
         ]
     },
+    "vehicle_medium": {
+        "score": 70,
+        "keywords": [
+            "drifting",
+            "doing a drift",
+            "high speed driving",
+            "driving at high speed",
+            "racing"
+        ]
+    },
     "medium": {
         "score": 55,
         "keywords": [
-            "vehicle collision",
             "escaping",
             "crashing",
             "jumping",
             "falling",
             "running"
+        ]
+    },
+    "vehicle_low": {
+        "score": 20,
+        "keywords": [
+            "normal driving",
+            "driving a car",
+            "driving a vehicle",
+            "riding a motorcycle"
         ]
     },
     "low": {
@@ -64,7 +95,7 @@ NEGATION_PATTERN = re.compile(
 
 
 def calculate_visual_score(action: str) -> dict:
-    """Calculate visual score with action-specific negation handling."""
+    """Calculate visual score with vehicle and action intelligence."""
 
     text = re.sub(r"\s+", " ", str(action).lower()).strip()
 
@@ -101,15 +132,12 @@ def calculate_visual_score(action: str) -> dict:
     for item in matches:
         preceding_text = text[:item["start"]]
 
-        # Contrast words reset the scope of earlier negations.
         clauses = re.split(
             r"\b(?:but|however|although|yet)\b|[.;!?]",
             preceding_text
         )
 
-        current_clause = clauses[-1]
-
-        if NEGATION_PATTERN.search(current_clause):
+        if NEGATION_PATTERN.search(clauses[-1]):
             continue
 
         valid_matches.append(item)
