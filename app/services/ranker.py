@@ -1,6 +1,9 @@
+import logging
 import json
 import ollama
 
+
+logger = logging.getLogger(__name__)
 
 MODEL_NAME = "llama3.2:3b"
 BATCH_SIZE = 2
@@ -102,7 +105,7 @@ Moments:
 
 
 def rank_moments(moments):
-    """Rank moments in small batches with individual retries."""
+    """Rank moments with batch retries and safe failure handling."""
 
     if not moments:
         return []
@@ -120,30 +123,39 @@ def rank_moments(moments):
             f"of {len(moments)}..."
         )
 
-        results = analyze_batch(batch)
+        try:
+            results = analyze_batch(batch)
+        except Exception:
+            logger.exception("Batch ranking failed.")
+            results = {}
 
         for index, moment in enumerate(batch):
-            if index not in results:
-                print(
-                    f"Retrying moment "
-                    f"{batch_start + index + 1} individually..."
-                )
+            result = results.get(index)
+            ranking_status = "ai"
 
-                retry_results = analyze_batch([moment])
+            if result is None:
+                print(f"Retrying moment {batch_start + index + 1} individually...")
 
-                if 0 not in retry_results:
-                    raise ValueError(
-                        f"AI could not rank moment {batch_start + index + 1}."
-                    )
+                try:
+                    retry_results = analyze_batch([moment])
+                    result = retry_results.get(0)
+                except Exception:
+                    logger.exception("Individual ranking failed.")
 
-                result = retry_results[0]
-            else:
-                result = results[index]
+                if result is None:
+                    ranking_status = "fallback"
+                    result = {
+                        "score": 0,
+                        "reasons": [
+                            "AI ranking unavailable; candidate not scored."
+                        ]
+                    }
 
             ranked.append({
                 **moment,
                 "score": result["score"],
-                "reasons": result["reasons"]
+                "reasons": result["reasons"],
+                "ranking_status": ranking_status
             })
 
     return sorted(
