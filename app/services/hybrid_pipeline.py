@@ -1,9 +1,10 @@
 import logging
-import logging
+from pathlib import Path
 
 from app.services.ranker import rank_moments
 from app.services.multi_frame_analyzer import analyze_multiple_frames
 from app.services.hybrid_ranker import calculate_hybrid_score
+from app.services.frame_extractor import get_video_duration
 
 
 logger = logging.getLogger(__name__)
@@ -58,19 +59,37 @@ def rank_hybrid_candidates(
     visual_top_n: int = 5,
     overlap_threshold: float = 0.5
 ) -> list:
-    """Rank transcript candidates, remove duplicates, then analyze visually."""
+    """Validate, rank, deduplicate and visually analyze candidates."""
 
     if not candidates:
         logger.warning("No candidates received.")
         return []
 
+    if frame_count < 1:
+        raise ValueError("frame_count must be at least 1.")
+
     if visual_top_n < 1:
         raise ValueError("visual_top_n must be at least 1.")
+
+    if not 0 <= overlap_threshold <= 1:
+        raise ValueError("overlap_threshold must be between 0 and 1.")
+
+    # Step 1: Validate video before running AI.
+    video = Path(video_path)
+
+    if not video.is_file():
+        raise FileNotFoundError(
+            f"Video file not found: {video_path}"
+        )
+
+    video_duration = get_video_duration(str(video))
+
+    logger.info("Video duration: %.2f seconds", video_duration)
 
     logger.info("===== HYBRID RANKING STARTED =====")
     logger.info("Input candidates: %d", len(candidates))
 
-    # Step 1: Validate candidates.
+    # Step 2: Validate candidate timestamps and duration.
     prepared_candidates = []
 
     for moment in candidates:
@@ -81,6 +100,12 @@ def rank_hybrid_candidates(
             continue
 
         if not isinstance(end, (int, float)):
+            continue
+
+        if start < 0 or end <= start:
+            continue
+
+        if end > video_duration:
             continue
 
         duration = end - start
@@ -105,12 +130,15 @@ def rank_hybrid_candidates(
         logger.warning("No valid candidates available.")
         return []
 
-    # Step 2: Transcript ranking.
+    # Step 3: Transcript ranking.
     transcript_ranked = rank_moments(prepared_candidates)
 
-    logger.info("Transcript ranking completed: %d candidates", len(transcript_ranked))
+    logger.info(
+        "Transcript ranking completed: %d candidates",
+        len(transcript_ranked)
+    )
 
-    # Step 3: Remove duplicates.
+    # Step 4: Remove duplicates.
     unique_candidates = remove_overlapping_candidates(
         transcript_ranked,
         overlap_threshold=overlap_threshold
@@ -121,7 +149,7 @@ def rank_hybrid_candidates(
         len(transcript_ranked) - len(unique_candidates)
     )
 
-    # Step 4: Select top candidates.
+    # Step 5: Select top candidates.
     selected_candidates = unique_candidates[:visual_top_n]
 
     logger.info(
@@ -132,7 +160,7 @@ def rank_hybrid_candidates(
     hybrid_results = []
     failed_count = 0
 
-    # Step 5: Visual analysis and hybrid scoring.
+    # Step 6: Visual analysis and hybrid scoring.
     for index, moment in enumerate(selected_candidates, start=1):
         logger.info(
             "Analyzing candidate %d/%d",
@@ -142,7 +170,7 @@ def rank_hybrid_candidates(
 
         try:
             visual_result = analyze_multiple_frames(
-                video_path,
+                str(video),
                 moment["start"],
                 moment["end"],
                 frame_count=frame_count
@@ -162,9 +190,12 @@ def rank_hybrid_candidates(
 
         except Exception:
             failed_count += 1
-            logger.exception("Visual analysis failed for candidate %d", index)
+            logger.exception(
+                "Visual analysis failed for candidate %d",
+                index
+            )
 
-    # Step 6: Final summary.
+    # Step 7: Final summary.
     hybrid_results.sort(
         key=lambda item: item["hybrid_score"],
         reverse=True
