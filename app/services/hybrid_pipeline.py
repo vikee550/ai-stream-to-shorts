@@ -1,4 +1,3 @@
-
 import logging
 from pathlib import Path
 
@@ -7,6 +6,8 @@ from app.services.multi_frame_analyzer import analyze_multiple_frames
 from app.services.hybrid_ranker import calculate_hybrid_score
 from app.services.frame_extractor import get_video_duration
 from app.services.motion_detector import analyze_motion
+from app.services.audio_analyzer import analyze_audio
+from app.services.audio_scorer import calculate_audio_score
 
 
 logger = logging.getLogger(__name__)
@@ -59,9 +60,11 @@ def rank_hybrid_candidates(
     candidates: list,
     frame_count: int = 4,
     visual_top_n: int = 5,
-    overlap_threshold: float = 0.5
+    overlap_threshold: float = 0.5,
+    audio_path: str = None,
+    audio_offset: float = 0
 ) -> list:
-    """Validate, rank, visually analyze and measure candidate motion."""
+    """Rank candidates using transcript, visual, motion and audio evidence."""
 
     if not candidates:
         logger.warning("No candidates received.")
@@ -76,12 +79,30 @@ def rank_hybrid_candidates(
     if not 0 <= overlap_threshold <= 1:
         raise ValueError("overlap_threshold must be between 0 and 1.")
 
+    if audio_offset < 0:
+        raise ValueError("audio_offset cannot be negative.")
+
     video = Path(video_path)
 
     if not video.is_file():
         raise FileNotFoundError(
             f"Video file not found: {video_path}"
         )
+
+    audio = None
+
+    if audio_path is not None:
+        audio = Path(audio_path)
+
+        if not audio.is_file():
+            raise FileNotFoundError(
+                f"Audio file not found: {audio_path}"
+            )
+
+        logger.info("Audio analysis enabled.")
+        logger.info("Audio timestamp offset: %.2f", audio_offset)
+    else:
+        logger.info("Audio analysis disabled.")
 
     video_duration = get_video_duration(str(video))
 
@@ -177,11 +198,37 @@ def rank_hybrid_candidates(
                 moment["end"]
             )
 
+            audio_result = {
+                "audio_score": 0,
+                "spike_ratio": 0,
+                "quiet_ratio": 0
+            }
+
+            audio_details = {}
+
+            if audio is not None:
+                audio_start = moment["start"] + audio_offset
+                audio_end = moment["end"] + audio_offset
+
+                audio_details = analyze_audio(
+                    str(audio),
+                    audio_start,
+                    audio_end
+                )
+
+                audio_result = calculate_audio_score(audio_details)
+
+                logger.info(
+                    "Audio score: %d",
+                    audio_result["audio_score"]
+                )
+
             hybrid_score = calculate_hybrid_score(
                 transcript_score=moment["score"],
                 visual_score=visual_result["visual_score"],
                 gameplay_ratio=visual_result["gameplay_ratio"],
-                motion_score=motion_result["motion_score"]
+                motion_score=motion_result["motion_score"],
+                audio_score=audio_result["audio_score"]
             )
 
             hybrid_results.append({
@@ -189,6 +236,17 @@ def rank_hybrid_candidates(
                 **hybrid_score,
                 "motion_ratio": motion_result["motion_ratio"],
                 "motion_samples": motion_result["samples_compared"],
+                "audio_spike_ratio": audio_result["spike_ratio"],
+                "audio_quiet_ratio": audio_result["quiet_ratio"],
+                "audio_average_db": audio_details.get(
+                    "average_loudness_db"
+                ),
+                "audio_peak_db": audio_details.get(
+                    "peak_loudness_db"
+                ),
+                "audio_spike_count": audio_details.get(
+                    "spike_count", 0
+                ),
                 "visual_frames_analyzed": visual_result["frames_analyzed"]
             })
 
@@ -213,4 +271,3 @@ def rank_hybrid_candidates(
     logger.info("Successful results: %d", len(hybrid_results))
 
     return hybrid_results
-
