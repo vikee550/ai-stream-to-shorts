@@ -3,3 +3,8 @@ uvicorn
 python-dotenv
 google-genai
 pydantic
+python-multipart
+yt-dlp
+ollama
+opencv-python
+faster-whisper

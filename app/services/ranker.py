@@ -1,3 +1,4 @@
+import math
 import logging
 import json
 import ollama
@@ -6,7 +7,7 @@ import ollama
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "llama3.2:3b"
-BATCH_SIZE = 2
+BATCH_SIZE = 6
 
 
 def analyze_batch(moments):
@@ -26,38 +27,36 @@ def analyze_batch(moments):
     ]
 
     prompt = f"""
-You are an expert YouTube Shorts editor.
+You are an expert YouTube Shorts editor specializing in gaming highlights.
 
-Analyze every video moment independently.
+Analyze every video moment independently and assign a meaningful score from 0 to 100.
 
-Give each moment a score from 0 to 100.
+Evaluate these four dimensions:
+1. Action: What actually happens in the moment?
+2. Tension: How intense, risky, or suspenseful is it?
+3. Payoff: How significant or satisfying is the outcome?
+4. Reaction: How genuine and engaging is the player's reaction?
 
-Scoring boundaries:
-- 0-20: Boring or ordinary content with little engagement.
-- 21-40: Slightly interesting but weak highlight potential.
-- 41-60: Moderately engaging conversation or activity.
-- 61-80: Strong reactions, humor, exciting action or surprising events.
-- 81-100: Exceptional highlight with clear, memorable engagement.
+FACTOR SCORING:
 
-A normal conversation without a strong reaction or interesting event
-should generally score between 20 and 45.
+Give each factor an independent score from 0 to 100:
 
-Consider:
-- Genuine excitement and emotion
-- Humor and natural reactions
-- Surprising or interesting events
-- Interesting conversation
-- Potential viewer engagement
-- Transcript clarity and context
+- action: Quality and impressiveness of the actual gameplay event.
+- tension: Risk, suspense, difficulty, and intensity.
+- payoff: Significance and satisfaction of the event outcome.
+- reaction: Genuine emotion, humor, and audience engagement.
 
-Pre-filter signals are supporting evidence only.
-Do not give a high score just because keyword counts are high.
-
-Important:
-- Analyze every moment independently.
-- Do not invent events.
-- Do not assume something happened if the transcript is unclear.
-- Ordinary conversation should not automatically receive a high score.
+Guidelines:
+- Routine looting and movement should score low in action and payoff.
+- A close escape can score high in tension even without a kill.
+- A confirmed squad wipe can score high in action and payoff.
+- Do not assume an achievement without transcript evidence.
+- Compare moments within the same batch before assigning scores.
+- Give stronger events higher scores than weaker events.
+- Do not copy the same score breakdown across different events.
+- Use the full scoring range when the evidence supports it.
+- Do not give identical factor scores automatically.
+- Judge the actual event, not just exciting words.
 - Return valid JSON only.
 
 Required format:
@@ -65,8 +64,11 @@ Required format:
   "ranked_moments": [
     {{
       "index": 0,
-      "score": 75,
-      "reasons": ["Interesting reaction"]
+      "action": 80,
+      "tension": 70,
+      "payoff": 90,
+      "reaction": 75,
+      "reasons": ["Impressive gameplay", "Strong payoff"]
     }}
   ]
 }}
@@ -74,7 +76,6 @@ Required format:
 Moments:
 {json.dumps(prompt_data, ensure_ascii=False)}
 """
-
     response = ollama.chat(
         model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
@@ -86,20 +87,64 @@ Moments:
 
     results = {}
 
+    weights = {
+        "action": 0.35,
+        "tension": 0.25,
+        "payoff": 0.25,
+        "reaction": 0.15,
+    }
+
     for item in data.get("ranked_moments", []):
+        if not isinstance(item, dict):
+            continue
+
         index = item.get("index")
-        score = item.get("score")
 
         if (
-            isinstance(index, int)
-            and not isinstance(index, bool)
-            and 0 <= index < len(moments)
-            and isinstance(score, (int, float))
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or not 0 <= index < len(moments)
+            or index in results
         ):
-            results[index] = {
-                "score": max(0, min(100, round(score))),
-                "reasons": item.get("reasons", [])
-            }
+            continue
+
+        breakdown = {}
+        valid_scores = True
+
+        for factor in weights:
+            value = item.get(factor)
+
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+            ):
+                valid_scores = False
+                break
+
+            breakdown[factor] = max(0, min(100, round(value)))
+
+        if not valid_scores:
+            logger.warning("Skipping invalid factor scores for moment %s.", index)
+            continue
+
+        final_score = round(
+            sum(breakdown[factor] * weight for factor, weight in weights.items())
+        )
+
+        reasons = item.get("reasons", [])
+        if not isinstance(reasons, list):
+            reasons = []
+
+        results[index] = {
+            "score": final_score,
+            "score_breakdown": breakdown,
+            "reasons": [
+                reason.strip()
+                for reason in reasons
+                if isinstance(reason, str) and reason.strip()
+            ][:5],
+        }
 
     return results
 
@@ -154,6 +199,7 @@ def rank_moments(moments):
             ranked.append({
                 **moment,
                 "score": result["score"],
+                "score_breakdown": result.get("score_breakdown", {}),
                 "reasons": result["reasons"],
                 "ranking_status": ranking_status
             })

@@ -22,3 +22,14 @@ storage/temp/*
 # Local backup files
 *.backup.py
 *backup.py
+
+# Generated project data - keep videos out of GitHub
+storage/uploads/
+storage/clips/
+storage/temp/
+
+# Local backup and test files
+*.backup
+*.backup-*
+*.save
+*.tmp
